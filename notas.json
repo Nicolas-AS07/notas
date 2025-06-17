@@ -1,0 +1,92 @@
+{
+  "nodes": [
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fluxo-notas-local"
+      }
+    },
+    {
+      "name": "Extrair Pergunta",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "language": "python",
+        "mode": "runOnceForAllItems",
+        "code": "items = _input.all()\nif items:\n    data = items[0].json\n    pergunta = data.get('body', {}).get('pergunta') or data.get('pergunta')\n    return [{ json: { perguntaSentenca: pergunta } }]\nreturn []"
+      }
+    },
+    {
+      "name": "Ler CSV",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "parameters": {
+        "filePath": "C:/Users/nicos/Downloads/agente/202401_NFs_Cabecalho.csv"
+      }
+    },
+    {
+      "name": "Extrair CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "parameters": {
+        "operation": "extractFromFile",
+        "binaryPropertyName": "data",
+        "fileType": "csv",
+        "hasHeader": true
+      }
+    },
+    {
+      "name": "Agregação",
+      "type": "n8n-nodes-base.aggregate",
+      "parameters": {
+        "mode": "individualFields",
+        "fields": [
+          {
+            "inputFieldName": "valor",
+            "operation": "sum",
+            "outputFieldName": "totalGasto"
+          },
+          {
+            "inputFieldName": "valor",
+            "operation": "average",
+            "outputFieldName": "mediaValor"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Modelo Local",
+      "type": "n8n-nodes-base.openAIApi",
+      "parameters": {
+        "baseURL": "http://localhost:8080",
+        "model": "mistral-7b-instruct-v0.2.Q4_K_M",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Você é um assistente que responde perguntas sobre notas fiscais."
+          },
+          {
+            "role": "user",
+            "content": "Pergunta: {{$node['Extrair Pergunta'].json.perguntaSentenca}}\n\nDados:\n- Total gasto: {{$node['Agregação'].json.totalGasto}}\n- Média por nota: {{$node['Agregação'].json.mediaValor}}\n\nResponda em tom de conversa."
+          }
+        ]
+      }
+    },
+    {
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "parameters": {
+        "statusCode": 200,
+        "dataPropertyName": "resposta",
+        "responseBody": "={{ $node['Modelo Local'].json.choices[0].message.content }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{"node":"Extrair Pergunta","type":"main","index":0}]] },
+    "Extrair Pergunta": { "main": [[{"node":"Ler CSV","type":"main","index":0}]] },
+    "Ler CSV": { "main": [[{"node":"Extrair CSV","type":"main","index":0}]] },
+    "Extrair CSV": { "main": [[{"node":"Agregação","type":"main","index":0}]] },
+    "Agregação": { "main": [[{"node":"Modelo Local","type":"main","index":0}]] },
+    "Modelo Local": { "main": [[{"node":"Responder","type":"main","index":0}]] }
+  }
+}
